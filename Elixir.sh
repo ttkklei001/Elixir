@@ -7,19 +7,11 @@ if [ "$(id -u)" != "0" ]; then
     exit 1
 fi
 
-# 定义脚本保存路径
-SCRIPT_PATH="$HOME/ElixirV3.sh"
-
 # 检查并安装Docker
 function ensure_docker_installed() {
     if ! command -v docker &> /dev/null; then
         echo "Docker未检测到，正在安装..."
-        sudo apt-get update
-        sudo apt-get install -y apt-transport-https ca-certificates curl software-properties-common
-        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
-        sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
-        sudo apt-get update
-        sudo apt-get install -y docker-ce
+        curl -fsSL https://get.docker.com | bash
         echo "Docker已成功安装。"
     else
         echo "Docker已安装。"
@@ -51,29 +43,90 @@ EOF
     # 拉取 Docker 镜像
     docker pull elixirprotocol/validator:v3
 
-    # 判断用户是否使用Apple/ARM架构
-    read -p "是否在Apple/ARM架构上运行？(y/n): " is_arm
-
-    if [[ "$is_arm" == "y" ]]; then
-        # 针对Apple/ARM架构的运行选项
+    # 自动检测是否在Apple/ARM架构上运行
+    architecture=$(uname -m)
+    if [[ "$architecture" == "arm64" || "$architecture" == "aarch64" ]]; then
+        echo "检测到ARM架构，使用amd64镜像运行..."
         docker run -it -d \
           --env-file validator.env \
           --name elixir \
           --platform linux/amd64 \
           elixirprotocol/validator:v3
     else
-        # 默认运行选项
+        echo "检测到非ARM架构，使用默认镜像运行..."
         docker run -it -d \
           --env-file validator.env \
           --name elixir \
           elixirprotocol/validator:v3
     fi
+
+    # 操作完成后返回主菜单
+    echo "节点安装完成。即将返回主菜单..."
+    sleep 2
+    display_main_menu
 }
 
 # 查看Docker容器日志
 function view_docker_logs() {
     echo "正在查看Elixir Docker容器的日志..."
     docker logs -f elixir
+
+    # 返回主菜单
+    echo "日志查看结束。即将返回主菜单..."
+    sleep 2
+    display_main_menu
+}
+
+# 启动Watchtower进行自动更新并自动重启容器
+function start_watchtower_auto_update() {
+    echo "正在启动Watchtower进行自动更新并重启容器..."
+    docker run -d \
+        --name watchtower \
+        -v /var/run/docker.sock:/var/run/docker.sock \
+        containrrr/watchtower --interval 86400 --restart elixir  # 每24小时检查一次更新并重启
+
+    # 操作完成后返回主菜单
+    echo "Watchtower已启动，正在监控Elixir容器的更新。即将返回主菜单..."
+    sleep 2
+    display_main_menu
+}
+
+# 立即检查更新并重启容器
+function check_update_now() {
+    echo "正在立即检查并更新Elixir容器..."
+    docker run --rm \
+        -v /var/run/docker.sock:/var/run/docker.sock \
+        containrrr/watchtower -c --run-once elixir  # 立即检查更新并重启
+
+    # 操作完成后返回主菜单
+    echo "更新检查已完成。即将返回主菜单..."
+    sleep 2
+    display_main_menu
+}
+
+# 停止Watchtower自动更新
+function stop_watchtower_auto_update() {
+    echo "正在停止Watchtower自动更新..."
+    docker stop watchtower && docker rm watchtower
+
+    # 操作完成后返回主菜单
+    echo "Watchtower已停止。即将返回主菜单..."
+    sleep 2
+    display_main_menu
+}
+
+# 检查Watchtower状态
+function check_watchtower_status() {
+    if docker ps --filter "name=watchtower" --format '{{.Names}}' | grep -q "watchtower"; then
+        echo "Watchtower正在运行，并监控Elixir容器的更新。"
+    else
+        echo "Watchtower未运行。"
+    fi
+
+    # 操作完成后返回主菜单
+    echo "状态检查完成。即将返回主菜单..."
+    sleep 2
+    display_main_menu
 }
 
 # 主菜单
@@ -83,14 +136,26 @@ function display_main_menu() {
     echo "请选择需要执行的操作:"
     echo "1. 安装Elixir V3节点"
     echo "2. 查看Docker日志"
-    read -p "请输入选项（1-2）: " OPTION
-
+    echo "3. 启动自动更新"
+    echo "4. 停止自动更新"
+    echo "5. 检查自动更新状态"
+    echo "6. 立即检查更新"
+    echo "0. 退出"
+    
+    read -p "请输入选项（0-6）: " OPTION
     case $OPTION in
-    1) install_validator_node ;;
-    2) view_docker_logs ;;
-    *) echo "无效的选项。" ;;
+        1) install_validator_node ;;
+        2) view_docker_logs ;;
+        3) start_watchtower_auto_update ;;
+        4) stop_watchtower_auto_update ;;
+        5) check_watchtower_status ;;
+        6) check_update_now ;;  # 立即检查更新的选项
+        0) exit 0 ;;
+        *) echo "无效的选项，请输入 0-6 之间的数字。" ;;
     esac
 }
 
 # 运行主菜单
-display_main_menu
+while true; do
+    display_main_menu
+done
